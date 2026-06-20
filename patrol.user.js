@@ -8,6 +8,8 @@
 // @match        https://catwar.net/blog5287
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=catwar.net
 // @grant        none
+// @updateURL    https://github.com/elizavetaolemskaa-sketch/patroolchik/raw/refs/heads/main/patrol.user.js
+// @downloadURL  https://github.com/elizavetaolemskaa-sketch/patroolchik/raw/refs/heads/main/patrol.user.js
 // ==/UserScript==
 
 (function() {
@@ -196,81 +198,105 @@
 
         div.querySelector('#report_submit').onclick = async (e) => {
             e.preventDefault();
+
             const time = div.querySelector('#report_time').value;
             const date = div.querySelector('#report_date').value.trim();
             let leader = leaderInput.value.trim();
-            let membersRaw = membersTextarea.value.trim();
+            const membersRaw = membersTextarea.value.trim();
 
+            // Проверка обязательных полей
             if (!date) {
                 warningDiv.textContent = 'Укажите дату';
                 warningDiv.style.display = 'block';
                 return;
             }
             if (!leader) {
-                warningDiv.textContent = 'Укажите ведущего (или поставьте галочку "Я был собирающим")';
+                warningDiv.textContent = 'Укажите ведущего (или поставьте галочку "Я был ведущим")';
                 warningDiv.style.display = 'block';
                 return;
             }
-            // membersRaw может быть пустым, ведущий добавляется автоматически
+            if (!membersRaw) {
+                warningDiv.textContent = 'Укажите участников';
+                warningDiv.style.display = 'block';
+                return;
+            }
             warningDiv.style.display = 'none';
 
-            // 1. Получаем нормализованное имя ведущего (с ID)
-            let leaderFormatted = leader;
+           // 1. Проверяем ведущего: если у него нет ID в скобках – ищем через API
             let leaderId = '';
-            if (!leader.match(/\[\d+\]$/)) {
-                const id = await convertNameToId(leader);
-                if (id) {
-                    leaderFormatted = `${leader} [${id}]`;
-                    leaderId = id;
-                } else {
-                    leaderFormatted = leader;
-                }
+            let leaderNameOnly = leader;
+            const leaderIdMatch = leader.match(/^(.+?)\s*\[(\d+)\]$/);
+            if (leaderIdMatch) {
+                leaderNameOnly = leaderIdMatch[1].trim();
+                leaderId = leaderIdMatch[2];
             } else {
-                // Если уже есть ID – извлекаем его
-                const match = leader.match(/\[(\d+)\]$/);
-                if (match) leaderId = match[1];
-            }
-
-            // 2. Формируем список участников: разбиваем строку, удаляем пустые, убираем дубли
-            let membersList = membersRaw ? membersRaw.split(',').map(m => m.trim()).filter(m => m.length > 0) : [];
-
-            // 3. Проверяем, есть ли ведущий в списке (по имени или по ID)
-            // Сначала нормализуем каждого участника (попробуем найти ID)
-            const membersNormalized = await Promise.all(membersList.map(async (member) => {
-                if (member.match(/\[\d+\]$/)) return member; // уже с ID
-                const id = await convertNameToId(member);
-                if (id) {
-                    return `${member} [${id}]`;
+                // Пытаемся найти ID по имени
+                const foundId = await convertNameToId(leader);
+                if (foundId) {
+                    leaderId = foundId;
+                    leaderNameOnly = leader;
                 } else {
-                    return member;
+                    // Не найден – выдаём ошибку
+                    warningDiv.textContent = `⚠️ Игрок "${leader}" не найден! Проверьте имя.`;
+                    warningDiv.style.color = COLORS.warning;
+                    warningDiv.style.display = 'block';
+                    return;
                 }
-            }));
+            }
+            // Форматируем ведущего для вывода
+            const leaderFormatted = `${leaderNameOnly} [${leaderId}]`;
 
-            // Теперь проверяем, есть ли ведущий в списке (сравниваем по ID, если есть, иначе по имени)
-            let leaderInList = false;
-            let leaderNameForCompare = leader; // имя без ID
-            if (leaderId) {
-                // ищем участника с таким ID
-                leaderInList = membersNormalized.some(m => m.includes(`[${leaderId}]`));
-            } else {
-                // ищем по имени (без ID)
-                const leaderNameClean = leader.replace(/\[\d+\]$/, '').trim();
-                leaderInList = membersNormalized.some(m => {
-                    const memberNameClean = m.replace(/\[\d+\]$/, '').trim();
-                    return memberNameClean === leaderNameClean;
-                });
+            // 2. Разбираем список участников (без ID)
+            let membersList = membersRaw.split(',').map(m => m.trim()).filter(m => m.length > 0);
+
+            // 3. Добавляем ведущего в список, если его там нет (по имени без ID)
+            const leaderLower = leaderNameOnly.toLowerCase();
+            const hasLeader = membersList.some(m => m.toLowerCase().includes(leaderLower));
+            if (!hasLeader) {
+                membersList.push(leaderNameOnly);
             }
 
-            // Если ведущего нет в списке – добавляем его (в начало)
-            if (!leaderInList) {
-                membersNormalized.unshift(leaderFormatted);
+            // 4. Проверка на минимальное количество участников (>=3)
+            if (membersList.length < 3) {
+                warningDiv.textContent = '⚠️ В патруле должны участвовать от 3ёх котов!';
+                warningDiv.style.color = COLORS.warning;
+                warningDiv.style.display = 'block';
+                return;
             }
 
-            // 4. Формируем итоговый текст
-            let reportText = `[b]${time}, ${date}.\n`;
-            reportText += `Ведущий:[/b] ${leaderFormatted}\n`;
-            reportText += `[b]Ходили[/b]: ${membersNormalized.join(', ')}`;
+            // 5. Для каждого участника проверяем наличие ID и формируем список с ID
+            const membersFormatted = [];
+            for (const member of membersList) {
+                let memberName = member;
+                let memberId = '';
+                // Если уже есть ID в скобках – извлекаем
+                const idMatch = member.match(/^(.+?)\s*\[(\d+)\]$/);
+                if (idMatch) {
+                    memberName = idMatch[1].trim();
+                    memberId = idMatch[2];
+                } else {
+                    // Пытаемся найти ID
+                    const foundId = await convertNameToId(member);
+                    if (foundId) {
+                        memberId = foundId;
+                        memberName = member;
+                    } else {
+                        // Не найден – выдаём ошибку и прерываем
+                        warningDiv.textContent = `⚠️ Игрок "${member}" не найден! Проверьте имя.`;
+                        warningDiv.style.color = COLORS.warning;
+                        warningDiv.style.display = 'block';
+                        return;
+                    }
+                }
+                membersFormatted.push(`${memberName} [${memberId}]`);
+            }
 
+            // 6. Собираем отчёт
+            let reportText = `${time}, ${date}.\n`;
+            reportText += `Ведущий: ${leaderFormatted}\n`;
+            reportText += `Ходили: ${membersFormatted.join(', ')}`;
+
+            // 7. Вставляем в поле комментария
             const field = document.querySelector('#comment');
             if (field) {
                 field.value = reportText;
@@ -346,5 +372,7 @@
     } else {
         insertPanel();
     }
+
+})();
 
 })();

@@ -292,9 +292,9 @@
             }
 
             // 6. Собираем отчёт
-            let reportText = `${time}, ${date}.\n`;
-            reportText += `Ведущий: ${leaderFormatted}\n`;
-            reportText += `Ходили: ${membersFormatted.join(', ')}`;
+            let reportText = `[b]${time}, ${date}.\n`;
+            reportText += `Ведущий:[/b] ${leaderFormatted}\n`;
+            reportText += `[b]Ходили:[/b] ${membersFormatted.join(', ')}`;
 
             // 7. Вставляем в поле комментария
             const field = document.querySelector('#comment');

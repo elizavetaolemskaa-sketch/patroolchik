@@ -101,12 +101,19 @@
         const leaderInput = div.querySelector('#report_leader');
         const membersTextarea = div.querySelector('#report_members');
 
-        div.querySelector('#report_submit').onclick = async (e) => {
-            e.preventDefault();
-            warningDiv.style.display = 'none';
+div.querySelector('#report_submit').onclick = async (e) => {
+    e.preventDefault();
+    warningDiv.style.display = 'none';
 
-            const time = div.querySelector('#report_time').value;
-            const date = div.querySelector('#report_date').value.trim();
+    const time = div.querySelector('#report_time').value;
+    const dateISO = div.querySelector('#report_date').value.trim();
+    if (!dateISO) {
+        warningDiv.textContent = 'Укажите дату';
+        warningDiv.style.display = 'block';
+        return;
+    }
+    const date = formatDateForReport(dateISO); // <-- ВОТ ЭТО ДОБАВИТЬ
+
             let leader = leaderInput.value.trim();
             const membersRaw = membersTextarea.value.trim();
 

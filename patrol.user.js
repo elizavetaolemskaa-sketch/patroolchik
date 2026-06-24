@@ -25,24 +25,14 @@
     };
     const FONT_FAMILY = 'Georgia, serif';
 
-
-    let userData = {
-        name: localStorage.getItem('report_user_name') || '',
-        id: localStorage.getItem('report_user_id') || ''
-    };
-
-    function saveUserData() {
-        localStorage.setItem('report_user_name', userData.name);
-        localStorage.setItem('report_user_id', userData.id);
+    function getTodayISO() {
+        return new Date().toISOString().split('T')[0];
     }
 
-
-    function getCurrentDate() {
-        const d = new Date();
-        const day = String(d.getDate()).padStart(2, '0');
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const year = d.getFullYear();
-        return `${day}.${month}.${year}`;
+    function formatDateForReport(isoDate) {
+        if (!isoDate) return '';
+        const parts = isoDate.split('-');
+        return `${parts[2]}.${parts[1]}.${parts[0]}`;
     }
 
     async function convertNameToId(name) {
@@ -75,70 +65,6 @@
         }
     }
 
-    // панель
-    function createUserPanel() {
-        const panel = document.createElement('div');
-        panel.style.cssText = `background-color: ${COLORS.bgMain}; border: 1px solid ${COLORS.border}; margin: 10px 0; padding: 10px; font-family: ${FONT_FAMILY}; color: ${COLORS.textDark};`;
-        panel.innerHTML = `
-            <div style="background-color: ${COLORS.bgTabActive}; padding: 6px 10px; margin: -10px -10px 10px -10px; font-size: 14px; font-weight: bold; text-align: center; color: ${COLORS.textDark};">Мои данные</div>
-            <div style="display: grid; grid-template-columns: 100px 1fr; gap: 8px; align-items: center; font-size: 13px;">
-                <span>Имя:</span>
-                <input type="text" id="report_user_name" placeholder="Ваше имя" value="${userData.name}" style="width: 100%; padding: 4px; font-family: ${FONT_FAMILY};">
-                <span>ID:</span>
-                <input type="text" id="report_user_id" placeholder="Ваш ID" value="${userData.id}" style="width: 100%; padding: 4px; font-family: ${FONT_FAMILY};">
-            </div>
-            <div id="save_status" style="font-size: 11px; margin-top: 5px; text-align: center; color: ${COLORS.success}; display: none;"></div>
-            <button id="save_user_btn" style="width: 100%; margin-top: 10px; padding: 5px; background: ${COLORS.bgTabActive}; color: ${COLORS.textDark}; border: none; cursor: pointer; font-family: ${FONT_FAMILY}; font-weight: bold;">Сохранить</button>
-        `;
-
-        const saveBtn = panel.querySelector('#save_user_btn');
-        const nameInput = panel.querySelector('#report_user_name');
-        const idInput = panel.querySelector('#report_user_id');
-        const statusDiv = panel.querySelector('#save_status');
-
-        saveBtn.onclick = async (e) => {
-            e.preventDefault();
-            let name = nameInput.value.trim();
-            let id = idInput.value.trim();
-
-            if (!name && !id) {
-                statusDiv.textContent = 'Заполните хотя бы одно поле (имя или ID)';
-                statusDiv.style.color = COLORS.warning;
-                statusDiv.style.display = 'block';
-                return;
-            }
-
-            if (name && !id) {
-                statusDiv.textContent = 'Ищу ID по имени...';
-                statusDiv.style.display = 'block';
-                const convertedId = await convertNameToId(name);
-                if (convertedId) {
-                    id = convertedId;
-                    idInput.value = id;
-                    statusDiv.textContent = 'ID найден!';
-                    statusDiv.style.color = COLORS.success;
-                } else {
-                    statusDiv.textContent = 'Не удалось найти ID. Проверьте имя.';
-                    statusDiv.style.color = COLORS.warning;
-                    return;
-                }
-            }
-
-            userData.name = name;
-            userData.id = id;
-            saveUserData();
-
-            statusDiv.textContent = 'Данные сохранены!';
-            statusDiv.style.color = COLORS.success;
-            statusDiv.style.display = 'block';
-            setTimeout(() => { statusDiv.style.display = 'none'; }, 1500);
-            saveBtn.textContent = 'Сохранено!';
-            setTimeout(() => { saveBtn.textContent = 'Сохранить'; }, 1500);
-        };
-
-        return panel;
-    }
-
     // форма отчета
     function createReportForm() {
         const div = document.createElement('div');
@@ -148,7 +74,6 @@
         div.style.border = '1px solid ' + COLORS.border;
         div.style.fontFamily = FONT_FAMILY;
 
-        const currentDate = getCurrentDate();
         const possibleTimes = ['12:00', '14:00', '16:00', '17:00', '18:30', '21:00'];
 
         div.innerHTML = `
@@ -160,10 +85,7 @@
                 </select>
 
                 <span>Дата сбора:</span>
-                <input type="text" id="report_date" placeholder="дд.мм.гггг" value="${currentDate}" style="width: 100%; padding: 4px; font-family: ${FONT_FAMILY};">
-
-                <span>Я был ведущим?</span>
-                <input type="checkbox" id="report_is_leader" style="width: auto;">
+                <input type="date" id="report_date" value="${getTodayISO()}" style="width: 100%; padding: 4px; font-family: ${FONT_FAMILY};">
 
                 <span>Ведущий (имя/ID):</span>
                 <input type="text" id="report_leader" placeholder="Имя или ID" value="" style="width: 100%; padding: 4px; font-family: ${FONT_FAMILY};">
@@ -177,27 +99,11 @@
 
         const warningDiv = div.querySelector('#report_warning');
         const leaderInput = div.querySelector('#report_leader');
-        const isLeaderCheckbox = div.querySelector('#report_is_leader');
         const membersTextarea = div.querySelector('#report_members');
-
-        isLeaderCheckbox.addEventListener('change', function() {
-            if (this.checked) {
-                if (userData.name && userData.id) {
-                    leaderInput.value = `${userData.name} [${userData.id}]`;
-                } else if (userData.name) {
-                    leaderInput.value = userData.name;
-                } else {
-                    leaderInput.value = '';
-                }
-                leaderInput.disabled = true;
-            } else {
-                leaderInput.disabled = false;
-                leaderInput.value = '';
-            }
-        });
 
         div.querySelector('#report_submit').onclick = async (e) => {
             e.preventDefault();
+            warningDiv.style.display = 'none';
 
             const time = div.querySelector('#report_time').value;
             const date = div.querySelector('#report_date').value.trim();
@@ -211,7 +117,7 @@
                 return;
             }
             if (!leader) {
-                warningDiv.textContent = 'Укажите ведущего (или поставьте галочку "Я был ведущим")';
+                warningDiv.textContent = 'Укажите ведущего';
                 warningDiv.style.display = 'block';
                 return;
             }
@@ -223,33 +129,24 @@
             warningDiv.style.display = 'none';
 
            // 1. Проверяем ведущего: если у него нет ID в скобках – ищем через API
-            let leaderId = '';
-            let leaderNameOnly = leader;
-            const leaderIdMatch = leader.match(/^(.+?)\s*\[(\d+)\]$/);
-            if (leaderIdMatch) {
-                leaderNameOnly = leaderIdMatch[1].trim();
-                leaderId = leaderIdMatch[2];
-            } else {
-                // Пытаемся найти ID по имени
-                const foundId = await convertNameToId(leader);
-                if (foundId) {
-                    leaderId = foundId;
-                    leaderNameOnly = leader;
+            let leaderFormatted = leader;
+            if (!leader.match(/\[\d+\]$/)) {
+                const leaderId = await convertNameToId(leader);
+                if (leaderId) {
+                    leaderFormatted = `${leader} [${leaderId}]`;
                 } else {
-                    // Не найден – выдаём ошибку
-                    warningDiv.textContent = `⚠️ Игрок "${leader}" не найден! Проверьте имя.`;
+                    warningDiv.textContent = `⚠️ Игрок "${leader}" не найден. Проверьте имя.`;
                     warningDiv.style.color = COLORS.warning;
                     warningDiv.style.display = 'block';
                     return;
                 }
             }
-            // Форматируем ведущего для вывода
-            const leaderFormatted = `${leaderNameOnly} [${leaderId}]`;
 
             // 2. Разбираем список участников (без ID)
             let membersList = membersRaw.split(',').map(m => m.trim()).filter(m => m.length > 0);
 
             // 3. Добавляем ведущего в список, если его там нет (по имени без ID)
+             const leaderNameOnly = leaderFormatted.replace(/\[\d+\]$/, '').trim();
             const leaderLower = leaderNameOnly.toLowerCase();
             const hasLeader = membersList.some(m => m.toLowerCase().includes(leaderLower));
             if (!hasLeader) {
@@ -269,20 +166,17 @@
             for (const member of membersList) {
                 let memberName = member;
                 let memberId = '';
-                // Если уже есть ID в скобках – извлекаем
                 const idMatch = member.match(/^(.+?)\s*\[(\d+)\]$/);
                 if (idMatch) {
                     memberName = idMatch[1].trim();
                     memberId = idMatch[2];
                 } else {
-                    // Пытаемся найти ID
                     const foundId = await convertNameToId(member);
                     if (foundId) {
                         memberId = foundId;
                         memberName = member;
                     } else {
-                        // Не найден – выдаём ошибку и прерываем
-                        warningDiv.textContent = `⚠️ Игрок "${member}" не найден! Проверьте имя.`;
+                        warningDiv.textContent = `⚠️ Игрок "${member}" не найден в системе! Проверьте имя.`;
                         warningDiv.style.color = COLORS.warning;
                         warningDiv.style.display = 'block';
                         return;
@@ -332,7 +226,6 @@
         `;
 
         const content = panel.querySelector('.panel-content');
-        content.appendChild(createUserPanel());
         content.appendChild(createReportForm());
 
         return panel;

@@ -66,8 +66,7 @@
         }
     }
 
-    // Получаем имя по ID через страницу профиля /cat{id}.
-    // Имя лежит в <title> вида: "Профиль игрока Имя / CatWar".
+    // имя по ID через страницу профиля /cat{id}
     async function convertIdToName(id) {
         if (!id || !/^\d+$/.test(id)) return '';
 
@@ -92,7 +91,6 @@
     }
 
     // Разбор одиночной записи "Имя [ID]", "Имя" или "ID".
-    // Всегда перепроверяет ID через API.
     // Возвращает { name, id } или null, если имя не найдено и ID не был указан.
     async function resolveSinglePerson(raw, corrections, label) {
         const trimmed = raw.trim();
@@ -236,8 +234,7 @@
             // 3. Разбираем список участников
             const membersList = membersRaw.split(',').map(m => m.trim()).filter(m => m.length > 0);
 
-            // 4. СНАЧАЛА разрешаем всех участников (ID перепроверяются).
-            //    Это ключевой момент: до этого шага ID из ручного ввода нельзя доверять.
+            // 4. Сначала разрешаем всех участников (ID перепроверяются).
             const resolvedMembers = [];
             for (const member of membersList) {
                 const resolved = await resolveSinglePerson(member, corrections, 'Участник');
@@ -249,9 +246,9 @@
                 resolvedMembers.push(resolved);
             }
 
-            // 5. ТОЛЬКО ТЕПЕРЬ добавляем ведущего, если его нет.
+            // 5. Теперь добавляем ведущего, если его нет.
             //    Сравниваем по уже перепроверенным ID — дубликат по ID невозможен.
-            //    Собирающий в "Ходили" не добавляется автоматически.
+            //    Собирающий в "Ходили" не добавляется автоматически ! ! !
             if (!resolvedMembers.some(p => p.id === leader.id)) {
                 resolvedMembers.push(leader);
             }
@@ -281,7 +278,7 @@
             }
             field.value = reportText;
 
-            // 10. Заметки: коррекции (зелёным) + инфо о нераспознанных ID
+            // 10. Заметки: коррекции  + инфо о нераспознанных ID
             const notices = [];
             if (corrections.length > 0) {
                 notices.push(` ID скорректированы: ${corrections.join('; ')}`);

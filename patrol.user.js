@@ -21,7 +21,8 @@
         textDark: '#000000',
         border: '#043005',
         warning: '#8B0000',
-        success: '#000000'
+        success: '#000000',
+        correction: '#000000'
     };
     const FONT_FAMILY = 'Georgia, serif';
 
@@ -65,7 +66,76 @@
         }
     }
 
-    // форма отчета
+    // Получаем имя по ID через страницу профиля /cat{id}.
+    // Имя лежит в <title> вида: "Профиль игрока Имя / CatWar".
+    async function convertIdToName(id) {
+        if (!id || !/^\d+$/.test(id)) return '';
+
+        try {
+            const resp = await fetch(`/cat${id}`);
+            if (!resp.ok) return '';
+
+            const html = await resp.text();
+            const titleMatch = html.match(/<title>Профиль игрока\s+(.+?)\s*\/\s*CatWar<\/title>/i);
+
+            if (titleMatch && titleMatch[1]) {
+                const name = titleMatch[1].trim();
+                if (name && name !== id && !/^\d+$/.test(name)) {
+                    return name;
+                }
+            }
+        } catch (e) {
+            console.error('Ошибка при получении имени по ID:', e);
+        }
+
+        return '';
+    }
+
+    // Разбор одиночной записи "Имя [ID]", "Имя" или "ID".
+    // Всегда перепроверяет ID через API.
+    // Возвращает { name, id } или null, если имя не найдено и ID не был указан.
+    async function resolveSinglePerson(raw, corrections, label) {
+        const trimmed = raw.trim();
+        if (!trimmed) return null;
+
+        // "Имя [ID]"
+        const m = trimmed.match(/^(.+?)\s*\[(\d+)\]$/);
+        if (m) {
+            const name = m[1].trim();
+            const providedId = m[2];
+            const actualId = await convertNameToId(name);
+            if (actualId) {
+                if (actualId !== providedId) {
+                    corrections.push(`${label}: ${name} [${providedId}] → [${actualId}]`);
+                }
+                return { name, id: actualId };
+            }
+            console.warn(`Не удалось проверить ID "${label}" ${name}, оставлен исходный [${providedId}]`);
+            return { name, id: providedId };
+        }
+
+        // Только ID
+        if (/^\d+$/.test(trimmed)) {
+            const id = trimmed;
+            const name = await convertIdToName(id);
+            if (name) return { name, id };
+            return { name: id, id, unresolvedName: true };
+        }
+
+        // Только имя
+        const id = await convertNameToId(trimmed);
+        if (id) return { name: trimmed, id };
+        return null;
+    }
+
+    // Форматирование человека для отчёта: "Имя [ID]" или "[ID]", если имя не получено.
+    function formatPersonForReport(person) {
+        if (person.unresolvedName || person.name === person.id) {
+            return `[${person.id}]`;
+        }
+        return `${person.name} [${person.id}]`;
+    }
+
     function createReportForm() {
         const div = document.createElement('div');
         div.style.marginBottom = '15px';
@@ -87,6 +157,9 @@
                 <span>Дата сбора:</span>
                 <input type="date" id="report_date" value="${getTodayISO()}" style="width: 100%; padding: 4px; font-family: ${FONT_FAMILY};">
 
+                <span>Собирающий (имя/ID):</span>
+                <input type="text" id="report_gatherer" placeholder="Имя или ID" value="" style="width: 100%; padding: 4px; font-family: ${FONT_FAMILY};">
+
                 <span>Ведущий (имя/ID):</span>
                 <input type="text" id="report_leader" placeholder="Имя или ID" value="" style="width: 100%; padding: 4px; font-family: ${FONT_FAMILY};">
 
@@ -98,32 +171,34 @@
         `;
 
         const warningDiv = div.querySelector('#report_warning');
+        const gathererInput = div.querySelector('#report_gatherer');
         const leaderInput = div.querySelector('#report_leader');
         const membersTextarea = div.querySelector('#report_members');
 
-div.querySelector('#report_submit').onclick = async (e) => {
-    e.preventDefault();
-    warningDiv.style.display = 'none';
+        div.querySelector('#report_submit').onclick = async (e) => {
+            e.preventDefault();
+            warningDiv.style.display = 'none';
+            warningDiv.style.color = COLORS.warning;
 
-    const time = div.querySelector('#report_time').value;
-    const dateISO = div.querySelector('#report_date').value.trim();
-    if (!dateISO) {
-        warningDiv.textContent = 'Укажите дату';
-        warningDiv.style.display = 'block';
-        return;
-    }
-    const date = formatDateForReport(dateISO); // <-- ВОТ ЭТО ДОБАВИТЬ
-
-            let leader = leaderInput.value.trim();
-            const membersRaw = membersTextarea.value.trim();
-
-            // Проверка обязательных полей
-            if (!date) {
+            const time = div.querySelector('#report_time').value;
+            const dateISO = div.querySelector('#report_date').value.trim();
+            if (!dateISO) {
                 warningDiv.textContent = 'Укажите дату';
                 warningDiv.style.display = 'block';
                 return;
             }
-            if (!leader) {
+            const date = formatDateForReport(dateISO);
+
+            const gathererRaw = gathererInput.value.trim();
+            const leaderRaw = leaderInput.value.trim();
+            const membersRaw = membersTextarea.value.trim();
+
+            if (!gathererRaw) {
+                warningDiv.textContent = 'Укажите собирающего';
+                warningDiv.style.display = 'block';
+                return;
+            }
+            if (!leaderRaw) {
                 warningDiv.textContent = 'Укажите ведущего';
                 warningDiv.style.display = 'block';
                 return;
@@ -133,76 +208,93 @@ div.querySelector('#report_submit').onclick = async (e) => {
                 warningDiv.style.display = 'block';
                 return;
             }
-            warningDiv.style.display = 'none';
 
-           // 1. Проверяем ведущего: если у него нет ID в скобках – ищем через API
-            let leaderFormatted = leader;
-            if (!leader.match(/\[\d+\]$/)) {
-                const leaderId = await convertNameToId(leader);
-                if (leaderId) {
-                    leaderFormatted = `${leader} [${leaderId}]`;
-                } else {
-                    warningDiv.textContent = `⚠️ Игрок "${leader}" не найден. Проверьте имя.`;
-                    warningDiv.style.color = COLORS.warning;
+            const corrections = [];
+
+            // 1. Собирающий — перепроверяем ID
+            const gatherer = await resolveSinglePerson(gathererRaw, corrections, 'Собирающий');
+            if (!gatherer) {
+                warningDiv.textContent = `⚠️ Игрок "${gathererRaw}" не найден. Проверьте имя.`;
+                warningDiv.style.display = 'block';
+                return;
+            }
+            if (gatherer.name !== gatherer.id) {
+                gathererInput.value = `${gatherer.name} [${gatherer.id}]`;
+            }
+
+            // 2. Ведущий — перепроверяем ID
+            const leader = await resolveSinglePerson(leaderRaw, corrections, 'Ведущий');
+            if (!leader) {
+                warningDiv.textContent = `⚠️ Игрок "${leaderRaw}" не найден. Проверьте имя.`;
+                warningDiv.style.display = 'block';
+                return;
+            }
+            if (leader.name !== leader.id) {
+                leaderInput.value = `${leader.name} [${leader.id}]`;
+            }
+
+            // 3. Разбираем список участников
+            const membersList = membersRaw.split(',').map(m => m.trim()).filter(m => m.length > 0);
+
+            // 4. СНАЧАЛА разрешаем всех участников (ID перепроверяются).
+            //    Это ключевой момент: до этого шага ID из ручного ввода нельзя доверять.
+            const resolvedMembers = [];
+            for (const member of membersList) {
+                const resolved = await resolveSinglePerson(member, corrections, 'Участник');
+                if (!resolved) {
+                    warningDiv.textContent = `⚠️ Игрок "${member}" не найден в системе! Проверьте имя.`;
                     warningDiv.style.display = 'block';
                     return;
                 }
+                resolvedMembers.push(resolved);
             }
 
-            // 2. Разбираем список участников (без ID)
-            let membersList = membersRaw.split(',').map(m => m.trim()).filter(m => m.length > 0);
-
-            // 3. Добавляем ведущего в список, если его там нет (по имени без ID)
-             const leaderNameOnly = leaderFormatted.replace(/\[\d+\]$/, '').trim();
-            const leaderLower = leaderNameOnly.toLowerCase();
-            const hasLeader = membersList.some(m => m.toLowerCase().includes(leaderLower));
-            if (!hasLeader) {
-                membersList.push(leaderNameOnly);
+            // 5. ТОЛЬКО ТЕПЕРЬ добавляем ведущего, если его нет.
+            //    Сравниваем по уже перепроверенным ID — дубликат по ID невозможен.
+            //    Собирающий в "Ходили" не добавляется автоматически.
+            if (!resolvedMembers.some(p => p.id === leader.id)) {
+                resolvedMembers.push(leader);
             }
 
-            // 4. Проверка на минимальное количество участников (>=3)
-            if (membersList.length < 3) {
+            // 6. Минимум 3 УНИКАЛЬНЫХ участника (считаем после дедупликации)
+            if (resolvedMembers.length < 3) {
                 warningDiv.textContent = '⚠️ В патруле должны участвовать от 3ёх котов!';
-                warningDiv.style.color = COLORS.warning;
                 warningDiv.style.display = 'block';
                 return;
             }
 
-            // 5. Для каждого участника проверяем наличие ID и формируем список с ID
-            const membersFormatted = [];
-            for (const member of membersList) {
-                let memberName = member;
-                let memberId = '';
-                const idMatch = member.match(/^(.+?)\s*\[(\d+)\]$/);
-                if (idMatch) {
-                    memberName = idMatch[1].trim();
-                    memberId = idMatch[2];
-                } else {
-                    const foundId = await convertNameToId(member);
-                    if (foundId) {
-                        memberId = foundId;
-                        memberName = member;
-                    } else {
-                        warningDiv.textContent = `⚠️ Игрок "${member}" не найден в системе! Проверьте имя.`;
-                        warningDiv.style.color = COLORS.warning;
-                        warningDiv.style.display = 'block';
-                        return;
-                    }
-                }
-                membersFormatted.push(`${memberName} [${memberId}]`);
-            }
+            // 7. Форматируем участников
+            const membersFormatted = resolvedMembers.map(formatPersonForReport);
 
-            // 6. Собираем отчёт
+            // 8. Собираем отчёт
             let reportText = `[b]${time}, ${date}.\n`;
-            reportText += `Ведущий:[/b] ${leaderFormatted}\n`;
+            reportText += `Собирающий:[/b] ${formatPersonForReport(gatherer)}\n`;
+            reportText += `[b]Ведущий:[/b] ${formatPersonForReport(leader)}\n`;
             reportText += `[b]Ходили:[/b] ${membersFormatted.join(', ')}`;
 
-            // 7. Вставляем в поле комментария
+            // 9. Вставляем в поле комментария
             const field = document.querySelector('#comment');
-            if (field) {
-                field.value = reportText;
-            } else {
+            if (!field) {
                 warningDiv.textContent = 'Поле ввода не найдено. Проверьте селектор.';
+                warningDiv.style.display = 'block';
+                return;
+            }
+            field.value = reportText;
+
+            // 10. Заметки: коррекции (зелёным) + инфо о нераспознанных ID
+            const notices = [];
+            if (corrections.length > 0) {
+                notices.push(` ID скорректированы: ${corrections.join('; ')}`);
+            }
+            if (gatherer.unresolvedName) {
+                notices.push(`ℹ️ Имя по ID собирающего не получено, в отчёте будет [${gatherer.id}].`);
+            }
+            if (leader.unresolvedName) {
+                notices.push(`ℹ️ Имя по ID ведущего не получено, в отчёте будет [${leader.id}].`);
+            }
+            if (notices.length > 0) {
+                warningDiv.style.color = corrections.length > 0 ? COLORS.correction : COLORS.textDark;
+                warningDiv.textContent = notices.join(' ');
                 warningDiv.style.display = 'block';
             }
         };
@@ -238,19 +330,15 @@ div.querySelector('#report_submit').onclick = async (e) => {
         return panel;
     }
 
-    // вставка
     function insertPanel() {
         const panel = createMainPanel();
 
-
         const sendButton = document.querySelector('#send_comment');
         if (sendButton) {
-
             sendButton.parentNode.insertBefore(panel, sendButton.nextSibling);
             console.log('✅ Панель вставлена после #send_comment');
             return;
         }
-
 
         const form = document.querySelector('form');
         if (form) {
@@ -259,18 +347,15 @@ div.querySelector('#report_submit').onclick = async (e) => {
             return;
         }
 
-
         document.body.appendChild(panel);
         console.log('✅ Панель вставлена в конец body (запасной вариант)');
     }
 
     addBackgroundStyle();
 
-
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', insertPanel);
     } else {
         insertPanel();
     }
-
 })();
